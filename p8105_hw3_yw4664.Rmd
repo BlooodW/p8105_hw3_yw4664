@@ -18,8 +18,6 @@ library(knitr)
 
 library(ggplot2)
 
-library(gt)
-
 library(p8105.datasets)
 
 data("instacart")
@@ -100,17 +98,13 @@ top3_table <- instacart |>
   
   arrange(aisle, desc(n))
 
-top3_table |>
-  
-  gt() |>
-  
-  cols_label(
-    aisle = "Aisle",
-    product_name = "Product",
-    n = "Times ordered"
-  ) |>
-  
-  tab_header(title = "Top 3 products in the 3 aisles")
+kable(
+  top3_table,
+  format = "pipe",
+  col.names = c("Aisle", "Product", "Times ordered"),
+  caption = "Top 3 products in three aisles",
+  align = c("l","l","c")
+)
 
 ```
 
@@ -132,11 +126,12 @@ mean_hour_tbl <- instacart |>
   
   pivot_wider(names_from = day, values_from = mean_hour)
 
-mean_hour_tbl |> 
-  gt() |>
-  
-  tab_header(title = "Mean hour by each day") |>
-  
-  cols_label(product_name = "") 
 
+kable(
+  mean_hour_tbl,
+  format = "pipe",
+  col.names = c("", days),
+  caption = "Mean order hour by each day",
+  align = c("l", rep("c", length(days)))
+)
 ```
