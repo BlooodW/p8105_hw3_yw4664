@@ -5,26 +5,137 @@ date: "2025-10-07"
 output: github_document
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+## Problem 1
+
+### Loading Libraries
+
+```{r, echo=TRUE, results='hide', message=FALSE}
+library(tidyverse)
+
+library(janitor)
+
+library(knitr)
+
+library(ggplot2)
+
+library(gt)
+
+library(p8105.datasets)
+
+data("instacart")
 ```
 
-## R Markdown
+### 1. Short description of the dataset
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+```{r, echo=TRUE}
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+nrow(instacart); ncol(instacart)
 
-```{r cars}
-summary(cars)
+glimpse(instacart)
+
+sample_n(instacart, 5)
+
+```
+The instacart dataset has 1,384,617 rows and 15 variables. Every row is a product added to an order.
+
+Key variables include the info (order_id, user_id, order_number), timing (order_dow 0–6, order_hour_of_day 0–23, days_since_prior_order), product data (product_id, product_name, aisle_id/aisle, department_id/department), and cart related info (add_to_cart_order, reordered).
+
+For example, there's an order_id = 1 (user 112108’s 4th order), placed on day 4 at 10:00, contains 8 items such as Bulgarian Yogurt and several fresh vegetables, with some marked as reordered = 1.
+
+### 2. How many aisles are there, and which aisles are the most items ordered from?
+
+```{r, echo=TRUE}
+
+n_aisles <- n_distinct(instacart$aisle)
+n_aisles
+
+aisle_counts <- instacart |> 
+  count(aisle, sort = TRUE)
+
+head(aisle_counts, 10) |> 
+  kable(col.names = c("Aisle", "Number of items ordered"))
+
+```
+There are ```r n_aisles``` aisles; the top 3 largest are the fresh vegetables, fresh fruits and packaged vegetables fruits aisles.
+
+### 3. Plot showing the number of items ordered in each aisle
+
+```{r, echo=TRUE}
+
+aisle_counts |> 
+  
+  filter(n > 10000) |>
+  
+  mutate(aisle = fct_reorder(aisle, n)) |>
+  
+  ggplot(aes(x = aisle, y = n)) +
+  
+  geom_col() +
+  
+  coord_flip() +
+  
+  labs(x = NULL, y = "Number of items ordered",
+       title = "Instacart orders by aisle (over 10000 orders)") +
+  
+  theme_minimal(base_size = 12)
+
+```
+### 4. Table showing the three most popular items in each of the aisles “baking ingredients”, “dog food care”, and “packaged vegetables fruits”
+
+```{r, echo=TRUE}
+top3_table <- instacart |>
+  
+  filter(aisle %in% c("baking ingredients",
+                      "dog food care",
+                      "packaged vegetables fruits")) |>
+  
+  count(aisle, product_name, sort = TRUE) |>
+  
+  group_by(aisle) |>
+  
+  slice_max(n, n = 3, with_ties = FALSE) |>
+  
+  ungroup() |>
+  
+  arrange(aisle, desc(n))
+
+top3_table |>
+  
+  gt() |>
+  
+  cols_label(
+    aisle = "Aisle",
+    product_name = "Product",
+    n = "Times ordered"
+  ) |>
+  
+  tab_header(title = "Top 3 products in the 3 aisles")
+
 ```
 
-## Including Plots
+### 5. Table showing the mean hour of the day at which Pink Lady Apples and Coffee Ice Cream are ordered on each day of the week
 
-You can also embed plots, for example:
+```{r, echo=TRUE}
+days <- c("Sun","Mon","Tue","Wed","Thu","Fri","Sat")
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+mean_hour_tbl <- instacart |>
+  filter(product_name %in% c("Pink Lady Apples", "Coffee Ice Cream")) |>
+  
+  mutate(day = factor(order_dow, levels = 0:6, labels = days)) |>
+  
+  group_by(product_name, day) |>
+  
+  summarize(mean_hour = mean(order_hour_of_day), .groups = "drop") |>
+  
+  mutate(mean_hour = round(mean_hour, 2)) |>
+  
+  pivot_wider(names_from = day, values_from = mean_hour)
+
+mean_hour_tbl |> 
+  gt() |>
+  
+  tab_header(title = "Mean hour by each day") |>
+  
+  cols_label(product_name = "") 
+
 ```
-
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
