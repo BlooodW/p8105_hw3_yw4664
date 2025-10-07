@@ -80,6 +80,7 @@ aisle_counts |>
   theme_minimal(base_size = 12)
 
 ```
+
 ### 4. Table showing the three most popular items in each of the aisles “baking ingredients”, “dog food care”, and “packaged vegetables fruits”
 
 ```{r, echo=TRUE}
