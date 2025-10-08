@@ -135,3 +135,177 @@ kable(
   align = c("l", rep("c", length(days)))
 )
 ```
+
+## Problem 2
+
+### Loading data
+
+```{r, echo=TRUE}
+
+library(tidyverse)
+
+library(lubridate)
+
+library(scales)
+
+library(knitr)
+
+library(patchwork)
+
+zip_path  <- "data/zillow_data/Zip Codes.csv"
+zori_path <- "data/zillow_data/Zip_zori_uc_sfrcondomfr_sm_month_NYC.csv"
+
+zip_meta <- read_csv(zip_path) |>
+  clean_names() |>
+  rename(zip = zip_code) |>
+  mutate(zip = str_pad(as.character(zip), 5, pad = "0"))
+
+zori_wide <- read_csv(zori_path) |>
+  clean_names() |>
+  rename(zip = region_name) |>
+  mutate(zip = str_pad(as.character(zip), 5, pad = "0"))
+
+zori_long <- zori_wide |>
+  pivot_longer(
+    cols = matches("^x\\d{4}_\\d{2}_\\d{2}$"),
+    names_to  = "date_raw",
+    values_to = "zori"
+  ) |>
+  mutate(date = ymd(str_replace_all(sub("^x", "", date_raw), "_", "-"))) |>
+  select(zip, date, zori)
+
+zori <- zori_long |>
+  left_join(zip_meta, by = "zip") |>
+  relocate(zip, date, zori)
+
+start_month <- ymd("2015-01-01")
+end_month   <- ymd("2024-08-31")
+
+zori_hw3 <- zori |>
+  filter(date >= start_month, date <= end_month) |>
+  mutate(year  = year(date), month = month(date))
+
+```
+
+
+### 1. How many ZIP codes are observed 116 times? How many are observed fewer than 10 times? Why are some ZIP codes are observed rarely and others observed in each month?
+
+```{r, echo=TRUE}
+
+zip_counts <- zori_hw3 |>
+  filter(!is.na(zori)) |>
+  count(zip, name = "n_months")
+
+n_zip_116  <- sum(zip_counts$n_months == 116)
+n_zip_lt10 <- sum(zip_counts$n_months < 10)
+
+kable(
+  tibble(
+    `in all 116 months` = n_zip_116,
+    `fewer than 10 months` = n_zip_lt10
+  ),
+  format = "pipe",
+  caption = "ZIPs between Jan 2015 and Aug 2024"
+)
+
+```
+
+The reasons are that maybe some ZIPs are business only and rarely have residential rents, or that Zillow reports a month for a ZIP only when there’s enough listing signal, thus the conditions of ZIPs observed vary greatly.
+
+### 2. Plot showing NYC Rental Prices within ZIP codes for all available years
+
+```{r, echo=TRUE}
+p_borough <- zori_hw3 |>
+  filter(!is.na(county), !is.na(zori)) |>
+  ggplot(aes(x = date, y = zori, group = zip)) +
+  geom_line(alpha = 0.5, linewidth = 0.3) +          # 只有 ZIP 的线
+  facet_wrap(~ county, ncol = 3) +                     # 用 county 分面
+  scale_y_continuous(labels = label_dollar()) +
+  scale_x_date(
+    date_breaks = "1 year",
+    date_labels = "%Y",
+    expand = expansion(mult = c(0.01, 0.01)),
+    guide  = guide_axis(angle = 45, check.overlap = TRUE)
+  ) +
+  labs(title = "ZIP Rental Prices",
+       x = NULL, y = "ZORI") +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x = element_text(size = 10),
+    strip.text  = element_text(size = 12),
+    panel.grid.minor = element_blank()
+  )
+
+p_borough
+
+```
+
+Manhattan has the highest overall rents throughout all boroughs. It also has widest spread across ZIPs. There's a sharp 2020–2021 dip with the strongest rebound, and some ZIPs > $6–8k by 2024. The ZIP with the highest rental prices is, surprisingly, 10007 (Tribeca), which partly contridicts my expectation.
+
+Brooklyn has the second highest rents, with gentle rise in 2015–2019, a small pandemic dip, then a steep climb after 2021. The within-borough spread is moderate.
+
+Queens has a similar shape to Brooklyn but a bit lower. There are 2 high-end ZIP outliers pushing above $4k by 2023–2024, which are both in Long Island City (where I am living in..).
+
+Bronx has the lowest level overall, and has a tight band of ZIPs. It has a steady gradual increase and minimal dip.
+
+Staten Island also has a low level and a sparser coverage. It has very mild upward trend and a small spread.
+
+### 3. Average rental price within each ZIP code over each month in 2023
+
+```{r, echo=TRUE}
+zip_2023_mean <- zori_hw3 |>
+  filter(year(date) == 2023, !is.na(county), !is.na(zori)) |>
+  group_by(county, zip) |>
+  summarize(
+    avg_2023 = mean(zori), 
+    n_months = n(), 
+    .groups = "drop"
+  )
+
+zip_2023_mean <- zip_2023_mean %>%
+  mutate(county = fct_reorder(county, avg_2023, .fun = median, na.rm = TRUE))
+
+p_2023 <- ggplot(zip_2023_mean, aes(x = county, y = avg_2023)) +
+  geom_violin(trim = TRUE, alpha = 0.6) +
+  geom_boxplot(width = 0.14, outlier.alpha = 0.25) +
+  scale_y_continuous(labels = label_dollar()) +
+  labs(
+    title = "Distribution of ZIP-level Average Rental Prices in 2023",
+    x = NULL, y = "Average ZORI in 2023"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(axis.text.x = element_text(size = 11))
+
+p_2023
+
+```
+
+Manhattan > Brooklyn > Queens > Bronx ≈ Staten Island.
+
+Manhattan has the highest median and the widest spread, with a long right tail (ZIPs above $7–8k).
+
+Brooklyn sits mid-high with substantial spread; Queens is lower with some high-end ZIP outliers (about $4k).
+
+Bronx and Richmond are lowest and tightest, indicating more uniformly lower prices.
+
+Violin widths show most ZIPs cluster around the borough medians; Richmond’s shape is narrower, likely fewer ZIPs.
+
+### 4. Combine the two previous plots and save
+
+```{r, echo=TRUE}
+
+library(patchwork)
+
+combined_plot <- p_borough / p_2023 + 
+  plot_layout(heights = c(2, 1)) & 
+  theme(plot.margin = margin(6, 6, 6, 6))
+
+if (!dir.exists("results")) dir.create("results", recursive = TRUE)
+
+ggsave("results/hw3_zip_rentals_combined.png",
+       combined_plot, width = 14, height = 12, dpi = 320)
+
+```
+
+
+
