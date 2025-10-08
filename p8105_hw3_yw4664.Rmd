@@ -308,4 +308,177 @@ ggsave("results/hw3_zip_rentals_combined.png",
 ```
 
 
+## Problem 3
 
+### 1. Load, tidy, merge, and otherwise organize the data sets.
+
+```{r, echo=TRUE}
+
+library(tidyverse)
+library(janitor)
+library(lubridate)
+library(hms)
+library(knitr)
+library(scales)
+
+covar_path  <- "data/nhanes_covar.csv"  
+accel_path  <- "data/nhanes_accel.csv"
+
+covar <- readr::read_csv(covar_path, skip = 4, na = c("", "NA", ".")) |>
+  clean_names()
+
+if (!"seqn" %in% names(covar)) {
+  covar <- covar |>
+    rename(seqn = any_of(c("SEQN","seqn","id","participant_id")))
+}
+
+covar <- covar |>
+  mutate(
+    # sex: 1=male, 2=female
+    sex = recode(as.integer(sex), `1` = "Male", `2` = "Female", .default = NA_character_),
+    sex = factor(sex, levels = c("Male","Female")),
+    # education: 1/2/3
+    education = recode(as.integer(education),
+                       `1` = "Less than high school",
+                       `2` = "High school equivalent",
+                       `3` = "More than high school",
+                       .default = NA_character_),
+    education = factor(education,
+                       levels = c("Less than high school",
+                                  "High school equivalent",
+                                  "More than high school"),
+                       ordered = TRUE),
+    age = suppressWarnings(as.numeric(age))
+  )
+
+
+
+accel_wide <- read_csv(accel_path) |>
+  clean_names()
+
+if (!"seqn" %in% names(accel_wide)) {
+  accel_wide <- accel_wide |>
+    rename(seqn = any_of(c("id","participant_id","SEQN","seqn")))
+}
+
+accel_long <- accel_wide |>
+  pivot_longer(
+    cols = -seqn,                 # 关键修改：不再用 ^mims 的正则
+    names_to = "minute_var",
+    values_to = "mims"
+  ) |>
+  mutate(
+    minute = as.integer(readr::parse_number(minute_var)),
+    minute = pmax(minute, 1L),
+    time_of_day = hms::as_hms((minute - 1L) * 60)
+  ) |>
+  select(seqn, minute, time_of_day, mims) |>
+  arrange(seqn, minute)
+
+
+nhanes <- accel_long |>
+  inner_join(covar, by = "seqn") |>
+  filter(age >= 21) |>
+  filter(!is.na(sex), !is.na(education), !is.na(age))
+
+```
+
+### 2.1 Reader-friendly table for the number of men and women in each education category
+
+```{r, echo=TRUE}
+
+sex_edu_tbl <- nhanes |>
+  distinct(seqn, sex, education) |> 
+  count(education, sex, name = "n") |>
+  arrange(education, sex) |>
+  pivot_wider(names_from = sex, values_from = n, values_fill = 0)
+
+kable(sex_edu_tbl, format = "pipe",
+      caption = "Number of men and women in each education category")
+
+```
+
+The sample has the biggest number in “More than high school”, with 56 men, 59 women; “Less than high school” is smallest. Overall sex balance is fairly even, with a great tilt in “High school equivalent” (36 vs 23).
+
+### 2.2 Visualization of the age distributions for men and women in each education category
+
+```{r, echo=TRUE}
+
+p_age <- nhanes |>
+  distinct(seqn, age, sex, education) |>
+  ggplot(aes(x = age, fill = sex)) +
+  geom_density(alpha = 0.45) +
+  facet_wrap(~ education, nrow = 1) +
+  scale_fill_manual(values = c("#377eb8","#e41a1c")) +
+  labs(title = "Age distributions by sex",
+       x = "Age (years)", y = "Distribution", fill = NULL) +
+  theme_minimal(base_size = 12)
+
+p_age
+
+```
+
+Less than high school is the oldest group, and both sexes skew older, with women’s peak slightly later than men. Men show a small younger shoulder, about 40s.
+
+High school equivalent spread the widest, as men skew younger in 30s–40s, and women skew older between 60–75).
+
+More than high school is the youngest group, with the women peak around 35–45, and men are a bit more spread with a younger tail.
+
+### 3. Traditional analyses of accelerometer data focus on the total activity over the day
+
+```{r, echo=TRUE}
+
+total_activity <- nhanes |>
+  group_by(seqn, sex, education, age) |>
+  summarize(total_mims = sum(mims, na.rm = TRUE), .groups = "drop")
+
+p_total <- total_activity |>
+  ggplot(aes(x = age, y = total_mims, color = sex)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(se = FALSE, method = "loess", span = 0.9) +
+  facet_wrap(~ education, nrow = 1, scales = "free_y") +
+  scale_y_continuous(labels = label_comma()) +
+  scale_color_manual(values = c("#377eb8","#e41a1c")) +
+  labs(title = "Total daily activity vs age",
+       x = "Age (years)", y = "Total MIMS", color = NULL) +
+  theme_minimal(base_size = 12)
+
+p_total
+
+```
+Total activity declines with age in every education group.
+
+More than high school shows the highest activity, Less than high school the lowest, with High school equivalent in between.
+
+Women are generally higher than men at the same age—most pronounced in the More than high school panel. Gaps are more narrow at older ages.
+
+A visible mid-life bump for women in the High school equivalent group, at 40–50 years old; otherwise declines are smoother.
+
+### 4. Three-panel plot that shows the 24-hour activity time courses for each education level and use color to indicate sex
+
+```{r, echo=TRUE}
+
+minute_data <- nhanes |>
+  group_by(education, sex, minute, time_of_day) |>
+  summarize(mims_mean = mean(mims, na.rm = TRUE), .groups = "drop")
+
+p_24h <- minute_data |>
+  ggplot(aes(x = time_of_day, y = mims_mean, color = sex)) +
+  geom_line(alpha = 0.9) +
+  facet_wrap(~ education, nrow = 1) +
+  scale_x_time(breaks = hms::as_hms(c(0,6,12,18)*3600),
+               labels = c("00:00","06:00","12:00","18:00")) +
+  scale_color_manual(values = c("#377eb8","#e41a1c")) +
+  labs(title = "24-hour activity time courses by education",
+       x = "Time", y = "Mean MIMS", color = NULL) +
+  theme_minimal(base_size = 12)
+
+p_24h
+
+```
+
+The cycle in all groups is, very low 00:00–05:00 to sharp rise ~06:00–08:00 to daytime steadiness ~10:00–18:00 to decline into night.
+
+Daytime fluctuation are highest in More than high school, intermediate in High school equivalent, and lowest in Less than high school.
+
+Women’s mean MIMS is slightly higher than men’s during daytime, with near-overlap overnight. The gap is most visible in “More than high school.”
